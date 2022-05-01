@@ -19,5 +19,3 @@ Make sure [the piggyback mechanics are enabled](https://docs.checkmk.com/latest/
 ## Demo
 
 ![demo1](demo1.png)
-
-![demo2](demo2.png)
