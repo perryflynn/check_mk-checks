@@ -1,0 +1,131 @@
+#!/bin/bash
+
+set -u
+
+. /etc/check_mk/check_gitlab.conf
+SIDEKIQURL="http://127.0.0.1:8092"
+
+check() {
+    local out=$( curl --silent --max-time 5 --connect-timeout 5  \
+            -w "\n%{time_total}\t%{http_code}\t%{num_connects}" \
+            "$1"; echo -e "\t$?" 2> /dev/null )
+
+    # result
+    # local time=$(echo -e "$out" | awk '{print $1}')
+    # local status=$(echo -e "$out" | awk '{print $2}')
+    # local code=$(echo -e "$out" | awk '{print $4}')
+    
+    echo -e "$out"
+}
+
+getstatus() {
+    cat |  tail -n 1 | awk '{print $2}'
+}
+
+gettext() {
+    cat |  head -n -1
+}
+
+jsonokcheck() {
+    local live_response=$(check "$2")
+    local live_status=$(echo -e "$live_response" | getstatus)
+    local live_text=$(echo -e "$live_response" | gettext | tr -d '\n' | tr -d '\r')
+
+    local live_cmk_service="$1"
+    local live_cmk_code=2
+    local live_cmk_codetxt=CRIT
+    local live_cmk_text="HTTP $live_status; ${live_text:="Querying endpoint failed"}"
+
+    local live_overall=$(echo "$live_text" | jq -r -R 'fromjson? | .status')
+
+    if [ $live_status -eq 200 ] && [ "$live_overall" == "ok" ]
+    then
+        live_cmk_code=0
+        live_cmk_codetxt=OK
+        live_cmk_text="HTTP $live_status; $live_overall"
+    fi
+
+    echo "$live_cmk_code $live_cmk_service - $live_cmk_codetxt: $live_cmk_text"
+}
+
+
+# Health Check
+health_response=$(check "$BASEURL/-/health")
+health_status=$(echo -e "$health_response" | getstatus)
+health_text=$(echo -e "$health_response" | gettext)
+
+health_cmk_service="GitLab_Health"
+health_cmk_code=2
+health_cmk_codetxt=CRIT
+health_cmk_text="HTTP $health_status; ${health_text:="Querying endpoint failed"}"
+
+if [ $health_status -eq 200 ] && [ "$health_text" == "GitLab OK" ]
+then
+    health_cmk_code=0
+    health_cmk_codetxt=OK
+    health_cmk_text="HTTP $health_status; $health_text"
+fi
+
+echo "$health_cmk_code $health_cmk_service - $health_cmk_codetxt: $health_cmk_text"
+
+
+# liveness
+jsonokcheck "GitLab_liveness" "$BASEURL/-/liveness"
+
+
+# Readiness
+readi_response=$(check "$BASEURL/-/readiness?all=1")
+readi_status=$(echo -e "$readi_response" | getstatus)
+readi_text=$(echo -e "$readi_response" | gettext)
+
+readi_cmk_code=2
+readi_cmk_codetxt=CRIT
+readi_cmk_service="GitLab_Readiness"
+readi_cmk_text="Querying endpoint failed"
+
+readi_overall=$(echo "$readi_text" | jq -r -R 'fromjson? | .status')
+
+if [ $readi_status -eq 200 ] && [ "$readi_overall" == "ok" ]
+then
+    readi_cmk_code=0
+    readi_cmk_codetxt=OK
+    readi_cmk_text="HTTP $readi_status; $readi_overall"
+fi
+
+echo "$readi_cmk_code $readi_cmk_service - $readi_cmk_codetxt: $readi_cmk_text"
+readi_overall_status=$readi_cmk_code
+
+
+# Readiness Items
+while read -r check
+do
+
+    readi_cmk_service="GitLab_Readiness_$check"
+    if [ $readi_overall_status -eq 0 ]
+    then
+        readi_cmk_code=2
+        readi_cmk_codetxt=CRIT
+        readi_cmk_text="Querying endpoint failed"
+
+        readi_itemstatus=$(echo "$readi_text" | jq -R -r "fromjson? | .$check[0].status")
+
+        if [ $readi_status -eq 200 ] && [ "$readi_itemstatus" == "ok" ]
+        then
+            readi_cmk_code=0
+            readi_cmk_codetxt=OK
+            readi_cmk_text="HTTP $readi_status; $readi_itemstatus"
+        fi
+    else
+        readi_cmk_code=3
+        readi_cmk_codetxt=UNKNOWN
+        readi_cmk_text="Querying endpoint failed"
+    fi
+
+    echo "$readi_cmk_code $readi_cmk_service - $readi_cmk_codetxt: $readi_cmk_text"
+
+done <<< "$(echo "$readi_text" | jq -R 'fromjson? | keys' | jq -r '.[]' | grep -v status)"
+
+
+# sidekiq
+jsonokcheck "GitLab_Sidekiq_Readiness" "$SIDEKIQURL/readiness"
+jsonokcheck "GitLab_Sidekiq_Liveness" "$SIDEKIQURL/liveness"
