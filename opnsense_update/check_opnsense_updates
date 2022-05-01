@@ -41,7 +41,7 @@ elif update_count > 0:
     status_text = "WARN"
     metrics = "updates=" + str(update_count)
 
-print("<<<<aorta.mm.brickburg.de>>>>")
+print("<<<<" + cfg['piggybackhost'] + ">>>>")
 print("<<<local>>>")
 print(f"{status_code} {service} {metrics} {status_text}: {version}; {os}; {update_msg}")
 print("<<<<>>>>")
