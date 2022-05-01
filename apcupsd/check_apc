@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+
+PIGGIBACK="basement_ups"
+
+apcprop() {
+    apcaccess -u -p "$1"
+}
+
+# APC USV
+MODEL=$(apcprop "MODEL" | sed -r 's/(^\s+|\s+$)//g' | sed 's/\s/_/g')
+SERIALNO=$(apcprop "SERIALNO" | sed -r 's/(^\s+|\s+$)//g')
+MODELTXT=$(apcprop "MODEL" | sed -r 's/(^\s+|\s+$)//g')
+APCNAME=$(apcprop "UPSNAME" | sed -r 's/(^\s+|\s+$)//g')
+
+STATE_STR=$(apcprop "STATUS" | sed 's/\s//g')
+STATE_NUM=$(if [ "$STATE_STR" == "ONLINE" ]; then echo 0; elif [ "$STATE_STR" == "CHARGING" ]; then echo 1; else echo 2; fi)
+
+LOAD=$(apcprop "LOADPCT")
+WATTMAX=$(apcprop "NOMPOWER")
+WATTNOW=$(bc <<< "scale=2;$(apcprop "LOADPCT")*$(apcprop "NOMPOWER")/100")
+TIMELEFT=$(apcprop "TIMELEFT")
+BATTCHARGE=$(apcprop "BCHARGE")
+
+METRIC="powerload=$LOAD"
+METRIC="${METRIC}|wattmax=$WATTMAX"
+METRIC="${METRIC}|wattnow=$WATTNOW"
+METRIC="${METRIC}|timeleft=$TIMELEFT"
+METRIC="${METRIC}|battcharge=$BATTCHARGE"
+
+echo "<<<<${PIGGIBACK}>>>>"
+echo "<<<local>>>"
+echo "$STATE_NUM $MODEL $METRIC $STATE_STR: ${LOAD}% load; $TIMELEFT minutes left; ${WATTNOW}W of ${WATTMAX}W; $MODELTXT ($SERIALNO)"
+
+BATTDATE=$(apcprop "BATTDATE")
+XONBATT=$(apcprop "XONBATT")
+XOFFBATT=$(apcprop "XOFFBATT")
+CUMONBATT=$(apcprop "CUMONBATT")
+LASTSTEST=$(apcprop "LASTSTEST")
+
+echo "0 ${MODEL}_Batt_Date - ${BATTDATE:-Undefined}"
+echo "0 ${MODEL}_Batt_Enter - ${XONBATT:-Undefined}"
+echo "0 ${MODEL}_Batt_Leave - ${XOFFBATT:-Undefined}"
+echo "0 ${MODEL}_Batt_Seconds - ${CUMONBATT:-Undefined}"
+echo "0 ${MODEL}_Last_Test - ${LASTSTEST:-Undefined}"
+
+echo "<<<<>>>>"
