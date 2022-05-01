@@ -1,4 +1,4 @@
-# GitLab Health Checks
+# Jitsi-Meet Health Checks
 
 | Name | Description |
 |------|-------------|
