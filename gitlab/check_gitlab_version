@@ -1,0 +1,69 @@
+#!/bin/bash
+
+set -u
+
+if [ -f "/etc/check_mk/check_gitlab.conf" ]; then
+    . /etc/check_mk/check_gitlab.conf
+fi
+
+check() {
+    local out=$( curl --silent --max-time 5 --connect-timeout 5 \
+            --header "REFERER: https://gitlab.kws.de" \
+            -w "\n%{time_total}\t%{http_code}\t%{num_connects}" \
+            "$1"; echo -e "\t$?" 2> /dev/null )
+
+    # result
+    # local time=$(echo -e "$out" | awk '{print $1}')
+    # local status=$(echo -e "$out" | awk '{print $2}')
+    # local code=$(echo -e "$out" | awk '{print $4}')
+
+    echo -e "$out"
+}
+
+getstatus() {
+    cat |  tail -n 1 | awk '{print $2}'
+}
+
+gettext() {
+    cat |  head -n -1
+}
+
+# version check
+current_version=$(dpkg -s "$PACKAGENAME" | grep "Version:" | awk '{print $2}')
+requestinfo="{\"version\":\"$current_version\"}"
+
+version_response=$(check "https://version.gitlab.com/check.json?gitlab_info=$(echo "$requestinfo" | base64)")
+version_status=$(echo -e "$version_response" | getstatus)
+version_text=$(echo -e "$version_response" | gettext | tr -d '\n' | tr -d '\r')
+
+# example response:
+# 200 {"latest_stable_versions":["15.6.0","15.5.4"],"latest_version":"15.6.0","severity":"warning","details":""}
+
+version_cmk_code=3
+version_cmk_codetxt=UNKN
+version_cmk_service="GitLab_Version"
+version_cmk_text="Unknown state"
+
+if [ "$version_status" == "200" ]; then
+    version_severity=$(echo "$version_text" | jq -r .severity)
+
+    if [ "$version_severity" == "success" ]; then
+        version_cmk_code=0
+        version_cmk_codetxt=OK
+        version_cmk_text="Up to date"
+    elif [ "$version_severity" == "warning" ]; then
+        version_cmk_code=1
+        version_cmk_codetxt=WARN
+        version_cmk_text="Update available: $version_text"
+    elif [ "$version_severity" == "danger" ]; then
+        version_cmk_code=2
+        version_cmk_codetxt=CRIT
+        version_cmk_text="Security update available: $version_text"
+    else
+        version_cmk_text="Unexpected state returned, please check check_mk plugin and gitlab version API: $version_text"
+    fi
+else
+    version_cmk_text="Request failed; HTTP Status: $version_status; Response: $version_cmk_text"
+fi
+
+echo "$version_cmk_code $version_cmk_service - Edition: $PACKAGENAME; Installed Version: $current_version; $version_cmk_text"
